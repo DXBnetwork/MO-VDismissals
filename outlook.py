@@ -15,13 +15,13 @@ from sharepoint import search_folder, upload_file_to_sharepoint
 load_dotenv()
 
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
-MAILBOX_USER_ID = os.getenv("mailbox_user_id", "litigationfillings@murrayosorio.com")
+MAILBOX_USER_ID = os.getenv("mailbox_user_id", "litigationfilings@murrayosorio.com")
 WATCH_FOLDER_NAME = os.getenv("watch_folder_name", "DocketBird")
 SUBSCRIPTION_SECRET = os.getenv("subscription_secret")
 NOTIFICATION_URL = os.getenv("notification_url")
 
 app = FastAPI()
-
+ 
 credential = ClientSecretCredential(
     os.getenv("tenant_id"),
     os.getenv("client_id"),

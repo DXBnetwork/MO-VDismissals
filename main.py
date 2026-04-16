@@ -7,8 +7,16 @@ from outlook import create_subscription, webhook_handler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    subscription = await create_subscription()
-    print({"subscription_status": "created", "subscription_id": subscription.get("id")})
+    try:
+        subscription = await create_subscription()
+        print({"subscription_status": "created", "subscription_id": subscription.get("id")})
+    except Exception as exc:
+        print(
+            {
+                "subscription_status": "failed",
+                "error": str(exc),
+            }
+        )
     yield
 
 
