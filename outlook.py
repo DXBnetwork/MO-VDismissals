@@ -1,4 +1,7 @@
+import asyncio
 import base64
+import hmac
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -9,16 +12,18 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import PlainTextResponse
 from msgraph import GraphServiceClient
-
 from sharepoint import search_folder, upload_file_to_sharepoint
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 MAILBOX_USER_ID = os.getenv("mailbox_user_id", "litigationfilings@murrayosorio.com")
 WATCH_FOLDER_NAME = os.getenv("watch_folder_name", "DocketBird")
 SUBSCRIPTION_SECRET = os.getenv("subscription_secret")
 NOTIFICATION_URL = os.getenv("notification_url")
+N8N_WEBHOOK_URL = os.getenv("n8n_webhook_url")
 
 app = FastAPI()
  
@@ -70,6 +75,20 @@ async def get_access_token():
     return token.token
 
 
+async def notify_n8n(matter_number: str, file_name: str, sharepoint_url: str):
+    if not N8N_WEBHOOK_URL:
+        logger.warning("n8n_webhook_url is not set — skipping notification.")
+        return
+    payload = {
+        "matter_number": matter_number,
+        "file_name": file_name,
+        "sharepoint_url": sharepoint_url,
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(N8N_WEBHOOK_URL, json=payload)
+        response.raise_for_status()
+
+
 async def process_matching_email(message_id: str):
     email = await get_email(MAILBOX_USER_ID, message_id)
     if not email or "Voluntary Dismissal" not in (email.subject or "") or not email.has_attachments:
@@ -91,19 +110,30 @@ async def process_matching_email(message_id: str):
             "message_id": message_id,
             "case_number": matter_number,
         }
-
     upload_result = await upload_file_to_sharepoint(
         access_token=access_token,
         folder_item=folder_item,
         file_name=file_name,
         file_bytes=file_bytes,
     )
+
+    folder_name = folder_item.get("name", "")
+    salesforce_matter_number = case_number(folder_name)
+    try:
+        await notify_n8n(
+            matter_number=salesforce_matter_number,
+            file_name=file_name,
+            sharepoint_url=upload_result.get("webUrl", ""),
+        )
+    except Exception:
+        logger.exception("Failed to notify n8n for message %s.", message_id)
+
     return {
         "status": "uploaded",
         "message_id": message_id,
         "case_number": matter_number,
         "upload_id": upload_result.get("id"),
-        "destination_name": folder_item.get("name"),
+        "destination_name": folder_name,
     }
 
 
@@ -113,15 +143,59 @@ async def webhook_handler(request: Request, validationToken: str = Query(None)):
         return PlainTextResponse(validationToken)
 
     payload = await request.json()
-    for notification in payload.get("value", []):
+    notifications = payload.get("value", [])
+
+    for notification in notifications:
+        client_state = notification.get("clientState")
+        if not SUBSCRIPTION_SECRET or not client_state:
+            logger.warning("Rejected webhook notification with missing clientState.")
+            return PlainTextResponse("Forbidden", status_code=403)
+        if not hmac.compare_digest(client_state, SUBSCRIPTION_SECRET):
+            logger.warning("Rejected webhook notification with invalid clientState.")
+            return PlainTextResponse("Forbidden", status_code=403)
+
+    for notification in notifications:
         resource = notification.get("resource", "")
         if not resource:
+            logger.warning("Skipped webhook notification with missing resource.")
             continue
         message_id = resource.split("/")[-1]
-        result = await process_matching_email(message_id)
-        print(result)
+        try:
+            result = await process_matching_email(message_id)
+            logger.info("Processed webhook notification: %s", result)
+        except Exception:
+            logger.exception("Failed to process webhook notification for message %s.", message_id)
 
     return PlainTextResponse("OK", status_code=202)
+
+
+async def renew_subscription(subscription_id: str):
+    access_token = await get_access_token()
+    expiration = (datetime.now(timezone.utc) + timedelta(minutes=4230)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.patch(
+            f"https://graph.microsoft.com/v1.0/subscriptions/{subscription_id}",
+            headers=headers,
+            json={"expirationDateTime": expiration},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def subscription_renewal_loop(subscription_id: str):
+    while True:
+        await asyncio.sleep(24 * 60 * 60)
+        try:
+            await renew_subscription(subscription_id)
+            logger.info("Subscription %s renewed.", subscription_id)
+        except Exception:
+            logger.exception("Failed to renew subscription %s.", subscription_id)
 
 
 async def create_subscription():
@@ -149,7 +223,7 @@ async def create_subscription():
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
-
+    
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://graph.microsoft.com/v1.0/subscriptions",

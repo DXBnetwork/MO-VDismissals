@@ -1,7 +1,21 @@
+from urllib.parse import quote
+
 import httpx
 
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+SHAREPOINT_SITE_ID = "69ddd908-8766-42d0-a501-367166fe5883"
+
+
+def is_folder_in_configured_site(resource: dict):
+    parent_reference = resource.get("parentReference", {})
+    site_id = parent_reference.get("siteId", "")
+    return (
+        resource.get("folder")
+        and parent_reference.get("driveId")
+        and resource.get("id")
+        and SHAREPOINT_SITE_ID.lower() in site_id.lower()
+    )
 
 
 async def search_folder(access_token: str, query_string: str):
@@ -13,6 +27,8 @@ async def search_folder(access_token: str, query_string: str):
             {
                 "entityTypes": ["driveItem"],
                 "query": {"queryString": query_string},
+                "from": 0,
+                "size": 25,
             }
         ]
     }
@@ -34,8 +50,7 @@ async def search_folder(access_token: str, query_string: str):
         for hit_container in search_request.get("hitsContainers", []):
             for hit in hit_container.get("hits", []):
                 resource = hit.get("resource", {})
-                parent_reference = resource.get("parentReference", {})
-                if resource.get("folder") and parent_reference.get("driveId") and resource.get("id"):
+                if is_folder_in_configured_site(resource):
                     return resource
     return None
 
@@ -58,7 +73,7 @@ async def upload_file_to_sharepoint(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/octet-stream",
     }
-    upload_url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}:/{file_name}:/content"
+    upload_url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}:/{quote(file_name, safe='')}:/content"
 
     async with httpx.AsyncClient() as client:
         response = await client.put(upload_url, headers=headers, content=file_bytes)
