@@ -149,12 +149,10 @@ async def webhook_handler(request: Request, validationToken: str = Query(None)):
         client_state = notification.get("clientState")
         if not SUBSCRIPTION_SECRET or not client_state:
             logger.warning("Rejected webhook notification with missing clientState.")
-            return PlainTextResponse("Forbidden", status_code=403)
+            continue
         if not hmac.compare_digest(client_state, SUBSCRIPTION_SECRET):
             logger.warning("Rejected webhook notification with invalid clientState.")
-            return PlainTextResponse("Forbidden", status_code=403)
-
-    for notification in notifications:
+            continue
         resource = notification.get("resource", "")
         if not resource:
             logger.warning("Skipped webhook notification with missing resource.")
@@ -174,6 +172,7 @@ async def renew_subscription(subscription_id: str):
     expiration = (datetime.now(timezone.utc) + timedelta(minutes=4230)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
+    
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -198,6 +197,21 @@ async def subscription_renewal_loop(subscription_id: str):
             logger.exception("Failed to renew subscription %s.", subscription_id)
 
 
+async def get_existing_subscription(access_token: str, resource: str):
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://graph.microsoft.com/v1.0/subscriptions",
+            headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+    for sub in data.get("value", []):
+        if sub.get("resource") == resource:
+            return sub
+    return None
+
+
 async def create_subscription():
     if not SUBSCRIPTION_SECRET:
         raise RuntimeError("Missing required env var: subscription_secret")
@@ -208,6 +222,12 @@ async def create_subscription():
     folder_id = await get_folder(MAILBOX_USER_ID, WATCH_FOLDER_NAME)
     if not folder_id:
         raise RuntimeError(f"Mail folder '{WATCH_FOLDER_NAME}' was not found for {MAILBOX_USER_ID}.")
+    
+    resource = f"users/{MAILBOX_USER_ID}/mailFolders/{folder_id}/messages"
+    existing = await get_existing_subscription(access_token, resource)
+    if existing:
+        logger.info("Reusing existing subscription %s.", existing.get("id"))
+        return existing
 
     expiration = (datetime.now(timezone.utc) + timedelta(minutes=4230)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
@@ -215,7 +235,7 @@ async def create_subscription():
     payload = {
         "changeType": "created",
         "notificationUrl": NOTIFICATION_URL,
-        "resource": f"users/{MAILBOX_USER_ID}/mailFolders/{folder_id}/messages",
+        "resource": resource,
         "expirationDateTime": expiration,
         "clientState": SUBSCRIPTION_SECRET,
     }
@@ -223,7 +243,7 @@ async def create_subscription():
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
-    
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://graph.microsoft.com/v1.0/subscriptions",
