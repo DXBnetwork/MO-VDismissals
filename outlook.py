@@ -37,11 +37,18 @@ graph_client = GraphServiceClient(credential)
 
 
 async def get_folder(user_id: str, folder_name: str):
-    folders = await graph_client.users.by_user_id(user_id).mail_folders.get()
-    for folder in folders.value:
-        if folder.display_name == folder_name:
-            return folder.id
-    return None
+    access_token = await get_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"https://graph.microsoft.com/v1.0/users/{user_id}/mailFolders",
+            headers=headers,
+            params={"$filter": f"displayName eq '{folder_name}'"},
+        )
+        response.raise_for_status()
+        data = response.json()
+    folders = data.get("value", [])
+    return folders[0]["id"] if folders else None
 
 
 async def get_email(user_id: str, message_id: str):
