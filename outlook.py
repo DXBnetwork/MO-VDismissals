@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 MAILBOX_USER_ID = os.getenv("mailbox_user_id", "litigationfilings@murrayosorio.com")
-WATCH_FOLDER_NAME = os.getenv("watch_folder_name", "DocketBird")
+WATCH_FOLDER_NAME = os.getenv("watch_folder_name", "Test Cases")
 SUBSCRIPTION_SECRET = os.getenv("subscription_secret")
 NOTIFICATION_URL = os.getenv("notification_url")
 N8N_WEBHOOK_URL = os.getenv("n8n_webhook_url")
