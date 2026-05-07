@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 from msgraph import GraphServiceClient
 from sharepoint import search_folder, upload_file_to_sharepoint
 
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
