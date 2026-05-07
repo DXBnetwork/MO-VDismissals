@@ -17,7 +17,8 @@ async def lifespan(app: FastAPI):
         if sub_id:
             renewal_task = asyncio.create_task(subscription_renewal_loop(sub_id))
     except Exception as exc:
-        print({"subscription_status": "failed", "error": str(exc)})
+        import traceback
+        print({"subscription_status": "failed", "error": str(exc), "type": type(exc).__name__, "trace": traceback.format_exc()})
 
     yield
 

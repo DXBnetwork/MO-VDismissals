@@ -43,12 +43,14 @@ async def get_folder(user_id: str, folder_name: str):
         response = await client.get(
             f"https://graph.microsoft.com/v1.0/users/{user_id}/mailFolders",
             headers=headers,
-            params={"$filter": f"displayName eq '{folder_name}'"},
+            params={"$top": "100"},
         )
         response.raise_for_status()
         data = response.json()
-    folders = data.get("value", [])
-    return folders[0]["id"] if folders else None
+    for folder in data.get("value", []):
+        if folder["displayName"] == folder_name:
+            return folder["id"]
+    return None
 
 
 async def get_email(user_id: str, message_id: str):
