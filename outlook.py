@@ -253,8 +253,8 @@ async def create_subscription():
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
-
-    async with httpx.AsyncClient() as client:
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             "https://graph.microsoft.com/v1.0/subscriptions",
             headers=headers,
