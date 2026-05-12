@@ -26,7 +26,7 @@ async def search_folder(access_token: str, query_string: str):
         "requests": [
             {
                 "entityTypes": ["driveItem"],
-                "query": {"queryString": query_string},
+                "query": {"queryString": query_string.replace("-", " ").replace(":", " ")},
                 "from": 0,
                 "size": 25,
             }
