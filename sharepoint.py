@@ -27,6 +27,7 @@ async def search_folder(access_token: str, query_string: str):
             {
                 "entityTypes": ["driveItem"],
                 "query": {"queryString": search_query},
+                "region": "NAM",
                 "from": 0,
                 "size": 25,
             }
