@@ -43,7 +43,12 @@ async def search_folder(access_token: str, query_string: str):
             headers=headers,
             json=payload,
         )
-        response.raise_for_status()
+        if not response.is_success:
+            raise httpx.HTTPStatusError(
+                f"{response.status_code} {response.text}",
+                request=response.request,
+                response=response,
+            )
         data = response.json()
 
     for search_request in data.get("value", []):
